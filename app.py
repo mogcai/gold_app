@@ -15,12 +15,13 @@ import pandas as pd
 import streamlit as st
 
 import data_retriever as dr
+import db
 
 # --------------------------------------------------------------------------- #
 # Config
 # --------------------------------------------------------------------------- #
-HISTORY_FILE = Path(__file__).with_name("gold_history.csv")
 CACHE_TTL = 300  # seconds — keeps Yahoo / CTF from being hammered on every rerun
+DB_STALE_AFTER = 3600  # seconds — fall back to a live fetch if the DB is older
 UNITS = {"HKD / 兩 tael": "tael", "HKD / 克 gram": "gram", "USD / oz": "usd_oz"}
 # Units offered by the calculator: the same conversion codes plus HKD/oz.
 CALC_UNITS = {
@@ -30,11 +31,7 @@ CALC_UNITS = {
     "USD / 盎司 oz": "usd_oz",
 }
 CALC_STEPS = {"tael": 10.0, "gram": 1.0, "oz_hkd": 10.0, "usd_oz": 1.0}
-HISTORY_COLUMNS = [
-    "timestamp_epoch", "timestamp", "spot_usd_oz", "usd_hkd",
-    "spot_hkd_gram", "spot_hkd_tael", "ctf_9999_buy", "ctf_9999_sell",
-    "ctf_pellet_buy", "ctf_pellet_sell", "premium_9999_sell", "premium_pellet_sell",
-]
+HISTORY_COLUMNS = db.COLUMNS
 
 st.set_page_config(page_title="Gold Price Tracker | 黃金價格追蹤", page_icon="🥇", layout="wide")
 
@@ -51,38 +48,14 @@ def load_snapshot() -> dict:
 
 
 def read_history() -> pd.DataFrame:
-    if HISTORY_FILE.exists():
-        try:
-            return pd.read_csv(HISTORY_FILE)
-        except Exception:
-            return pd.DataFrame(columns=HISTORY_COLUMNS)
-    return pd.DataFrame(columns=HISTORY_COLUMNS)
+    """Read snapshots from the committed SQLite database."""
+    return db.read_history()
 
 
 def append_history(snapshot: dict) -> pd.DataFrame:
     """Persist a snapshot row; reruns of the cached fetch are de-duplicated."""
-    history = read_history()
-    if not history.empty and float(history["timestamp_epoch"].iloc[-1]) == float(snapshot["fetched_at"]):
-        return history
-
-    spot, ctf = snapshot["spot"], snapshot["ctf"]
-    row = {
-        "timestamp_epoch": snapshot["fetched_at"],
-        "timestamp": datetime.fromtimestamp(snapshot["fetched_at"]).strftime("%Y-%m-%d %H:%M:%S"),
-        "spot_usd_oz": spot["usd_per_oz"],
-        "usd_hkd": spot["usd_hkd"],
-        "spot_hkd_gram": spot["hkd_per_gram"],
-        "spot_hkd_tael": spot["hkd_per_tael"],
-        "ctf_9999_buy": ctf["gold_9999_buy"],
-        "ctf_9999_sell": ctf["gold_9999_sell"],
-        "ctf_pellet_buy": ctf["gold_pellet_buy"],
-        "ctf_pellet_sell": ctf["gold_pellet_sell"],
-        "premium_9999_sell": ctf.get("gold_9999_sell_premium"),
-        "premium_pellet_sell": ctf.get("gold_pellet_sell_premium"),
-    }
-    history = pd.concat([history, pd.DataFrame([row])], ignore_index=True)
-    history.to_csv(HISTORY_FILE, index=False)
-    return history
+    db.insert_snapshot(snapshot)
+    return read_history()
 
 
 # --------------------------------------------------------------------------- #
@@ -150,10 +123,7 @@ with st.sidebar:
 
     history_rows = len(read_history())
     st.caption(f"History rows: **{history_rows}**")
-    if st.button("🗑️ Clear history", disabled=history_rows == 0, **stretch(st.button)):
-        HISTORY_FILE.unlink(missing_ok=True)
-        st.session_state.pop("history", None)
-        st.rerun()
+    st.caption("DB updated by GitHub Actions every 30 min")
 
 # --------------------------------------------------------------------------- #
 # Header
@@ -186,34 +156,37 @@ with button_col:
     st.write("")
     if st.button("🔄 Refresh Data", type="primary", **stretch(st.button)):
         st.cache_data.clear()
-        st.session_state.pop("history", None)
         st.rerun()
 
 # --------------------------------------------------------------------------- #
 # Fetch
 # --------------------------------------------------------------------------- #
-error = None
-try:
-    with st.spinner("Fetching live gold prices…"):
-        snapshot = load_snapshot()
-except Exception as exc:  # network / parsing failures must not kill the page
-    snapshot, error = None, exc
+# Primary source: the committed SQLite DB (kept fresh by GitHub Actions).
+history = read_history()
+db_epoch = db.latest_epoch()
+db_age = (time.time() - db_epoch) if db_epoch else None
 
-if snapshot:
-    history = append_history(snapshot)
-    st.session_state["history"] = history
-    updated = datetime.fromtimestamp(snapshot["fetched_at"]).strftime("%Y-%m-%d %H:%M:%S")
+# Fallback: fetch live when the DB is missing or stale.
+snapshot, error = None, None
+if db_age is None or db_age > DB_STALE_AFTER:
+    try:
+        with st.spinner("Fetching live gold prices…"):
+            snapshot = load_snapshot()
+        history = append_history(snapshot)
+        db_epoch = snapshot["fetched_at"]
+    except Exception as exc:  # network / parsing failures must not kill the page
+        snapshot, error = None, exc
+
+if db_epoch:
+    updated = datetime.fromtimestamp(db_epoch).strftime("%Y-%m-%d %H:%M:%S")
+    age_txt = f"{int(db_age)}s ago" if db_age is not None else "just now"
+    st.markdown(f"**Last updated:** `{updated}` ({age_txt})")
 else:
-    history = st.session_state.get("history")
-    if history is None:  # a DataFrame is not truthy-testable
-        history = read_history()
-    updated = "unavailable"
-
-st.markdown(f"**Last updated:** `{updated}`")
+    st.markdown("**Last updated:** `unavailable`")
 
 if error is not None:
     st.error(f"Could not refresh live prices — {type(error).__name__}: {error}")
-    st.caption("Showing the last snapshots stored in `gold_history.csv` (if any).")
+    st.caption("Showing the last snapshots stored in `gold.db` (if any).")
 
 # --------------------------------------------------------------------------- #
 # KPI metrics

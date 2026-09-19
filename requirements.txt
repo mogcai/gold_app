@@ -4,3 +4,9 @@ plotly>=5.18
 yfinance>=0.2.40
 requests>=2.31
 polars>=0.20
+pandas
+polars
+requests
+yfinance
+streamlit
+plotly
