@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import inspect
 import time
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -22,6 +22,7 @@ import db
 # --------------------------------------------------------------------------- #
 CACHE_TTL = 300  # seconds — keeps Yahoo / CTF from being hammered on every rerun
 DB_STALE_AFTER = 3600  # seconds — fall back to a live fetch if the DB is older
+HK_TZ = timezone(timedelta(hours=8))  # Streamlit Cloud runs in UTC; display in HKT
 UNITS = {"HKD / 兩 tael": "tael", "HKD / 克 gram": "gram", "USD / oz": "usd_oz"}
 # Units offered by the calculator: the same conversion codes plus HKD/oz.
 CALC_UNITS = {
@@ -178,7 +179,7 @@ if db_age is None or db_age > DB_STALE_AFTER:
         snapshot, error = None, exc
 
 if db_epoch:
-    updated = datetime.fromtimestamp(db_epoch).strftime("%Y-%m-%d %H:%M:%S")
+    updated = datetime.fromtimestamp(db_epoch, tz=HK_TZ).strftime("%Y-%m-%d %H:%M:%S")
     age_txt = f"{int(db_age)}s ago" if db_age is not None else "just now"
     st.markdown(f"**Last updated:** `{updated}` ({age_txt})")
 else:
