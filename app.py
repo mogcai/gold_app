@@ -186,8 +186,11 @@ else:
     st.markdown("**Last updated:** `unavailable`")
 
 # COMEX 黃金期貨市場狀態（休市時報價會凍結喺最後成交價）
-market_open = dr.is_market_open()
-if market_open:
+# 用 getattr 做防禦：若部署嘅 data_retriever 係舊版（未有 is_market_open），唔會令 app crash。
+_is_market_open = getattr(dr, "is_market_open", None)
+if _is_market_open is None:
+    st.markdown("**Market:** ⚪ COMEX gold futures status unavailable")
+elif _is_market_open():
     st.markdown("**Market:** 🟢 COMEX gold futures **open**")
 else:
     st.markdown("**Market:** 🔴 COMEX gold futures **closed** — 報價為最後成交價，唔會跳動")
