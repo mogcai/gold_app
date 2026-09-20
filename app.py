@@ -345,6 +345,10 @@ else:
 
                 fig = px.line(series, markers=True, labels={"value": "HKD / tael", "time": ""})
                 fig.update_layout(legend_title_text="", hovermode="x unified", margin=dict(l=0, r=0, t=10, b=0))
+                # 唔好由 0 開始，否則金價嘅變化會被壓扁到睇唔到。
+                lo, hi = series.min().min(), series.max().max()
+                pad = (hi - lo) * 0.05 or max(abs(hi) * 0.01, 1.0)
+                fig.update_yaxes(range=[lo - pad, hi + pad])
                 st.plotly_chart(fig, **stretch(st.plotly_chart))
             except ImportError:
                 st.line_chart(series)
@@ -362,6 +366,10 @@ else:
 
                 fig = px.line(premiums, markers=True, labels={"value": "%", "time": ""})
                 fig.update_layout(legend_title_text="", hovermode="x unified", margin=dict(l=0, r=0, t=10, b=0))
+                # 同樣唔好由 0 開始，令溢價嘅波動更明顯。
+                lo, hi = premiums.min().min(), premiums.max().max()
+                pad = (hi - lo) * 0.05 or max(abs(hi) * 0.01, 0.1)
+                fig.update_yaxes(range=[lo - pad, hi + pad])
                 st.plotly_chart(fig, **stretch(st.plotly_chart))
             except ImportError:
                 st.line_chart(premiums)
