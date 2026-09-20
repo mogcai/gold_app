@@ -185,6 +185,13 @@ if db_epoch:
 else:
     st.markdown("**Last updated:** `unavailable`")
 
+# COMEX 黃金期貨市場狀態（休市時報價會凍結喺最後成交價）
+market_open = dr.is_market_open()
+if market_open:
+    st.markdown("**Market:** 🟢 COMEX gold futures **open**")
+else:
+    st.markdown("**Market:** 🔴 COMEX gold futures **closed** — 報價為最後成交價，唔會跳動")
+
 if error is not None:
     st.error(f"Could not refresh live prices — {type(error).__name__}: {error}")
     st.caption("Showing the last snapshots stored in `gold.db` (if any).")
@@ -203,7 +210,8 @@ if snapshot:
             money(spot_value(spot, unit), unit),
             delta=f"USD/HKD {fx:.4f}",
             delta_color="off",
-            help="XAU spot converted with the live USD/HKD rate.",
+            help="XAU spot converted with the live USD/HKD rate."
+            + ("" if spot.get("market_open", True) else "（市場休市中，此為最後成交價）"),
         )
     with c2:
         st.metric(

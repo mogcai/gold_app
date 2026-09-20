@@ -7,6 +7,7 @@ and every value is reachable through a plain function.
 """
 
 import json
+from datetime import datetime, time, timedelta, timezone
 
 import polars as pl
 import requests
@@ -14,6 +15,44 @@ import yfinance as yf
 
 OZ_TO_GRAM = 31.1034768
 GRAMS_PER_TAEL = 37.429
+
+# COMEX 黃金期貨交易時段（美東時間）：
+#   週日 18:00 開市 → 週五 17:00 收市
+#   每個交易日 17:00–18:00 為每日休市（maintenance break）
+NY_TZ = timezone(timedelta(hours=-4))  # EDT；冬令時為 -5，見下方 _ny_offset
+DAILY_BREAK_START = time(17, 0)
+DAILY_BREAK_END = time(18, 0)
+
+
+def _ny_now() -> datetime:
+    """Current time in New York, using the correct DST offset."""
+    try:
+        from zoneinfo import ZoneInfo
+
+        return datetime.now(ZoneInfo("America/New_York"))
+    except Exception:
+        return datetime.now(NY_TZ)
+
+
+def is_market_open(now: datetime | None = None) -> bool:
+    """True when COMEX gold futures are trading (approximate, ignores holidays)."""
+    now = now or _ny_now()
+    weekday = now.weekday()  # Monday=0 … Sunday=6
+    current = now.time()
+
+    # 週六全日休市
+    if weekday == 5:
+        return False
+    # 週五 17:00 之後休市
+    if weekday == 4 and current >= DAILY_BREAK_START:
+        return False
+    # 週日 18:00 之前休市
+    if weekday == 6 and current < DAILY_BREAK_END:
+        return False
+    # 每日 17:00–18:00 維護時段
+    if DAILY_BREAK_START <= current < DAILY_BREAK_END:
+        return False
+    return True
 
 
 def get_gold_price_yahoo():
@@ -49,6 +88,8 @@ def get_gold_spot_snapshot():
         'hkd_per_oz': gold_price_hkd_oz,
         'hkd_per_gram': gold_price_hkd_gram,
         'hkd_per_tael': gold_price_hkd_tael,
+        'market_open': is_market_open(),
+        'quote_time': datetime.now(timezone.utc).timestamp(),
     }
 
 
